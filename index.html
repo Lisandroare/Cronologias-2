@@ -1,0 +1,421 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Línea de Tiempo Histórica</title>
+    
+    <!-- Fuentes y Estilos -->
+    <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <!-- Librerías de Vis-Timeline y SheetJS -->
+    <script type="text/javascript" src="https://unpkg.com/vis-timeline@latest/standalone/umd/vis-timeline-graph2d.min.js"></script>
+    <link href="https://unpkg.com/vis-timeline@latest/styles/vis-timeline-graph2d.min.css" rel="stylesheet" type="text/css" />
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+
+    <style>
+        :root {
+            --color-primario: #003366; /* Azul oscuro institucional */
+            --color-secundario: #4A90E2; /* Azul claro */
+            --fondo: #f8f9fa;
+            --texto: #333333;
+        }
+
+        body {
+            font-family: 'Montserrat', sans-serif;
+            background-color: var(--fondo);
+            color: var(--texto);
+            margin: 0;
+            padding: 20px;
+        }
+
+        /* Controles Superiores (Botones de Categoría) */
+        #filtros {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin-bottom: 20px;
+            padding: 15px;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+        }
+
+        .btn-filtro {
+            padding: 8px 15px;
+            border: 2px solid var(--color-secundario);
+            background: white;
+            color: var(--color-secundario);
+            border-radius: 20px;
+            cursor: pointer;
+            font-weight: 600;
+            transition: all 0.3s;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .btn-filtro.activo {
+            background: var(--color-secundario);
+            color: white;
+        }
+
+        /* Línea de Tiempo */
+        #timeline {
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 15px rgba(0,0,0,0.1);
+            border: 1px solid #ddd;
+        }
+        
+        .vis-item {
+            border: none;
+            border-radius: 4px;
+            color: white;
+            font-size: 12px;
+            cursor: pointer;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+        }
+        
+        .vis-item.vis-range { border-radius: 15px; }
+
+        /* Pop-up (Modal flotante) */
+        #popup {
+            position: absolute;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 5px 20px rgba(0,0,0,0.3);
+            width: 300px;
+            padding: 15px;
+            z-index: 1000;
+            display: none;
+            border-top: 4px solid var(--color-primario);
+            transition: all 0.2s ease;
+        }
+
+        #popup-header {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-weight: bold;
+            margin-bottom: 10px;
+            color: var(--color-primario);
+        }
+
+        #popup-title { font-size: 14px; margin-bottom: 10px; }
+        
+        .btn-ver-mas {
+            background: none;
+            border: none;
+            color: var(--color-secundario);
+            font-weight: bold;
+            cursor: pointer;
+            padding: 0;
+            margin-top: 10px;
+        }
+
+        #popup-extra { display: none; margin-top: 10px; font-size: 12px; color: #555; }
+        #popup-extra p { margin: 5px 0; }
+        
+        #popup-url {
+            display: inline-block;
+            margin-top: 10px;
+            color: #f1c40f; /* Color estrella */
+            font-size: 20px;
+            text-decoration: none;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Panel de Botones Superiores -->
+    <div id="filtros">
+        <!-- Se generan dinámicamente -->
+    </div>
+
+    <!-- Contenedor de la Línea de Tiempo -->
+    <div id="timeline"></div>
+
+    <!-- Pop-up Interactivo -->
+    <div id="popup">
+        <div id="popup-header">
+            <i id="popup-icon" class="fas fa-tag"></i>
+            <span id="popup-category">Categoría</span>
+        </div>
+        <div id="popup-title">Título del evento</div>
+        
+        <button class="btn-ver-mas" onclick="toggleExtra()">Ver más <i class="fas fa-chevron-down"></i></button>
+        
+        <div id="popup-extra">
+            <p><strong>Descripción:</strong> <span id="popup-colD"></span></p>
+            <p><strong>Detalle 1:</strong> <span id="popup-colF"></span></p>
+            <p><strong>Detalle 2:</strong> <span id="popup-colG"></span></p>
+            <a href="#" id="popup-url" target="_blank" title="Abrir enlace externo" style="display:none;">
+                <i class="fas fa-star"></i>
+            </a>
+        </div>
+    </div>
+
+    <script>
+        // --- CONFIGURACIÓN ---
+        // REEMPLAZAR ESTA URL por la URL "Raw" de tu Excel en GitHub
+        const URL_DEL_EXCEL_EN_GITHUB = "AQUI_TU_URL_RAW_DE_GITHUB/CRONOLOGIAS_FINAL.xlsx"; 
+        
+        let timeline;
+        let dataSetItems;
+        let dataSetGroups;
+        let paletaColores = ['#E74C3C', '#8E44AD', '#27AE60', '#F39C12', '#2980B9', '#D35400', '#16A085', '#2C3E50'];
+        let iconMap = ['fa-landmark', 'fa-book', 'fa-flag', 'fa-users', 'fa-map-marker-alt', 'fa-gavel', 'fa-seedling'];
+        let categoriaEstilos = {};
+
+        // Variables de interacción
+        let popup = document.getElementById('popup');
+        let popupFijo = false;
+
+        async function cargarDatos() {
+            try {
+                // Si estás probando localmente sin URL, aquí fallará por CORS. 
+                // En ese caso, usa un input type file o un JSON.
+                const response = await fetch(URL_DEL_EXCEL_EN_GITHUB);
+                const arrayBuffer = await response.arrayBuffer();
+                const workbook = XLSX.read(arrayBuffer, { type: 'array' });
+                
+                // Suponemos que los datos están en la primera hoja
+                const primeraHoja = workbook.SheetNames[0];
+                const datos = XLSX.utils.sheet_to_json(workbook.Sheets[primeraHoja], {header: 1});
+                
+                procesarDatos(datos);
+            } catch (error) {
+                console.error("Error al cargar el Excel. Asegúrate de que la URL de GitHub sea correcta y pública.", error);
+                document.getElementById('timeline').innerHTML = "<p style='padding:20px; color:red;'>Error al cargar el archivo CRONOLOGIAS FINAL.xlsx. Verifica la URL de GitHub.</p>";
+            }
+        }
+
+        function procesarDatos(filas) {
+            // Eliminar encabezados
+            const headers = filas.shift(); 
+            
+            let gruposRaw = new Set();
+            let categoriasRaw = new Set();
+            let items = [];
+
+            // Identificar localidades y categorías
+            filas.forEach((fila) => {
+                if(!fila[0]) return; // Si no hay año, saltar
+                if(fila[1]) gruposRaw.add(fila[1]); // Col B: Localidades
+                if(fila[4]) categoriasRaw.add(fila[4]); // Col E: Huellas (0-index = 4)
+            });
+
+            // Crear Grupos (Eje Vertical)
+            let groups = Array.from(gruposRaw).map((loc, index) => {
+                return { id: loc, content: loc };
+            });
+            dataSetGroups = new vis.DataSet(groups);
+
+            // Asignar colores/iconos a categorías
+            Array.from(categoriasRaw).forEach((cat, idx) => {
+                categoriaEstilos[cat] = {
+                    color: paletaColores[idx % paletaColores.length],
+                    icon: iconMap[idx % iconMap.length]
+                };
+            });
+            generarBotonesFiltro(Array.from(categoriasRaw));
+
+            // Crear Items (Línea de Tiempo)
+            filas.forEach((fila, id) => {
+                if(!fila[0]) return; // Col A
+                
+                let tiempo = fila[0].toString();
+                let start, end, type;
+
+                // Analizar si es periodo (ej: 1663-1800) o año puntual (1660)
+                if (tiempo.includes('-')) {
+                    let partes = tiempo.split('-');
+                    start = new Date(partes[0].trim(), 0, 1);
+                    end = new Date(partes[1].trim(), 0, 1);
+                    type = 'range';
+                } else {
+                    start = new Date(tiempo.trim(), 0, 1);
+                    type = 'point'; // Punto o ícono
+                }
+
+                let cat = fila[4] || "Sin categoría"; // Col E
+                let estilo = categoriaEstilos[cat];
+                let colorFondo = estilo ? estilo.color : '#999';
+                let iconClass = estilo ? estilo.icon : 'fa-circle';
+
+                // Contenido a mostrar en el timeline
+                let contentHtml = `<i class="fas ${iconClass}"></i>`;
+                if(type === 'range') contentHtml += ` <span style="padding-left:5px;">${fila[2] || ''}</span>`; // Titulo en barra
+
+                items.push({
+                    id: id,
+                    group: fila[1], // Localidad (Col B)
+                    start: start,
+                    end: end,
+                    type: type,
+                    content: contentHtml,
+                    className: 'item-' + cat.replace(/\s+/g, '-'),
+                    style: `background-color: ${colorFondo}; border-color: ${colorFondo};`,
+                    // Guardamos la info entera para el popup
+                    datosExtra: {
+                        titulo: fila[2] || 'Sin título',     // Col C
+                        desc: fila[3] || 'Sin datos',        // Col D
+                        cat: cat,                            // Col E
+                        amp1: fila[5] || 'N/A',              // Col F
+                        amp2: fila[6] || 'N/A',              // Col G
+                        url: fila[7] || null,                // Col H
+                        color: colorFondo,
+                        icon: iconClass
+                    }
+                });
+            });
+
+            dataSetItems = new vis.DataSet(items);
+
+            // Iniciar Timeline
+            var container = document.getElementById('timeline');
+            var options = {
+                zoomable: true,
+                horizontalScroll: true,
+                stack: false,
+                margin: { item: 10, axis: 5 },
+                orientation: 'top' // Años siempre visibles arriba
+            };
+            
+            timeline = new vis.Timeline(container, dataSetItems, dataSetGroups, options);
+
+            // --- Lógica del Pop-Up ---
+            
+            timeline.on('itemover', function (properties) {
+                if(!popupFijo) mostrarPopup(properties.item, properties.event);
+            });
+
+            timeline.on('itemout', function (properties) {
+                if(!popupFijo) popup.style.display = 'none';
+            });
+
+            timeline.on('select', function (properties) {
+                if(properties.items.length > 0) {
+                    popupFijo = true; // Fijar
+                    mostrarPopup(properties.items[0], properties.event);
+                } else {
+                    popupFijo = false; // Soltar con click afuera
+                    popup.style.display = 'none';
+                }
+            });
+        }
+
+        function generarBotonesFiltro(categorias) {
+            const contenedor = document.getElementById('filtros');
+            categorias.forEach(cat => {
+                let estilo = categoriaEstilos[cat];
+                let btn = document.createElement('button');
+                btn.className = 'btn-filtro activo';
+                btn.innerHTML = `<i class="fas ${estilo.icon}"></i> ${cat}`;
+                btn.style.borderColor = estilo.color;
+                
+                // Toggle filtro
+                btn.onclick = function() {
+                    this.classList.toggle('activo');
+                    if(this.classList.contains('activo')) {
+                        this.style.backgroundColor = estilo.color;
+                        this.style.color = "white";
+                    } else {
+                        this.style.backgroundColor = "white";
+                        this.style.color = estilo.color;
+                    }
+                    filtrarItems();
+                };
+                
+                // Color inicial (activo)
+                btn.style.backgroundColor = estilo.color;
+                btn.style.color = "white";
+                
+                contenedor.appendChild(btn);
+            });
+        }
+
+        function filtrarItems() {
+            let activos = [];
+            document.querySelectorAll('.btn-filtro.activo').forEach(btn => {
+                activos.push(btn.innerText.trim());
+            });
+
+            // Ocultar o mostrar manipulando el dataset
+            let allItems = dataSetItems.get();
+            allItems.forEach(item => {
+                if(activos.includes(item.datosExtra.cat)) {
+                    item.className = item.className.replace(' hidden', '');
+                } else {
+                    if(!item.className.includes('hidden')) item.className += ' hidden';
+                }
+            });
+            
+            // Actualizar vista. Para vis-timeline ocultamos via CSS
+            let css = document.getElementById('estilo-dinamico');
+            if(!css) {
+                css = document.createElement('style');
+                css.id = 'estilo-dinamico';
+                document.head.appendChild(css);
+            }
+            css.innerHTML = '.vis-item.hidden { display: none; }';
+        }
+
+        function mostrarPopup(itemId, evento) {
+            let item = dataSetItems.get(itemId);
+            if(!item) return;
+            let d = item.datosExtra;
+
+            // Posicionar popup cerca del mouse
+            let x = evento.pageX + 15;
+            let y = evento.pageY + 15;
+            popup.style.left = x + 'px';
+            popup.style.top = y + 'px';
+
+            // Llenar datos básicos
+            document.getElementById('popup-category').innerText = d.cat;
+            document.getElementById('popup-icon').className = 'fas ' + d.icon;
+            document.getElementById('popup-header').style.color = d.color;
+            popup.style.borderTopColor = d.color;
+            document.getElementById('popup-title').innerText = d.titulo;
+
+            // Datos ampliados
+            document.getElementById('popup-colD').innerText = d.desc;
+            document.getElementById('popup-colF').innerText = d.amp1;
+            document.getElementById('popup-colG').innerText = d.amp2;
+
+            // Enlace (Estrellita)
+            let link = document.getElementById('popup-url');
+            if(d.url && d.url.startsWith('http')) {
+                link.href = d.url;
+                link.style.display = 'inline-block';
+            } else {
+                link.style.display = 'none';
+            }
+
+            // Resetear "ver más"
+            document.getElementById('popup-extra').style.display = 'none';
+            document.querySelector('.btn-ver-mas').innerHTML = 'Ver más <i class="fas fa-chevron-down"></i>';
+            
+            popup.style.display = 'block';
+        }
+
+        function toggleExtra() {
+            let extra = document.getElementById('popup-extra');
+            let btn = document.querySelector('.btn-ver-mas');
+            if(extra.style.display === 'none' || extra.style.display === '') {
+                extra.style.display = 'block';
+                btn.innerHTML = 'Ver menos <i class="fas fa-chevron-up"></i>';
+            } else {
+                extra.style.display = 'none';
+                btn.innerHTML = 'Ver más <i class="fas fa-chevron-down"></i>';
+            }
+        }
+
+        // --- INICIAR ---
+        window.onload = cargarDatos;
+    </script>
+</body>
+</html>
