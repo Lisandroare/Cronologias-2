@@ -16,8 +16,8 @@
 
     <style>
         :root {
-            --color-primario: #003366; /* Azul oscuro institucional */
-            --color-secundario: #4A90E2; /* Azul claro */
+            --color-primario: #003366;
+            --color-secundario: #4A90E2;
             --fondo: #f8f9fa;
             --texto: #333333;
         }
@@ -30,7 +30,23 @@
             padding: 20px;
         }
 
-        /* Controles Superiores (Botones de Categoría) */
+        /* Caja de carga manual para sortear errores locales */
+        #caja-carga-manual {
+            display: none;
+            background: #ffeaa7;
+            border: 1px solid #fdcb6e;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            color: #d35400;
+        }
+
+        #caja-carga-manual input[type="file"] {
+            margin-top: 10px;
+            font-family: 'Montserrat', sans-serif;
+        }
+
+        /* Controles Superiores */
         #filtros {
             display: flex;
             flex-wrap: wrap;
@@ -80,7 +96,7 @@
         
         .vis-item.vis-range { border-radius: 15px; }
 
-        /* Pop-up (Modal flotante) */
+        /* Pop-up */
         #popup {
             position: absolute;
             background: white;
@@ -121,7 +137,7 @@
         #popup-url {
             display: inline-block;
             margin-top: 10px;
-            color: #f1c40f; /* Color estrella */
+            color: #f1c40f;
             font-size: 20px;
             text-decoration: none;
         }
@@ -129,12 +145,13 @@
 </head>
 <body>
 
-    <!-- Panel de Botones Superiores -->
-    <div id="filtros">
-        <!-- Se generan dinámicamente -->
+    <!-- Caja de fallback para carga manual (solo se ve si falla la carga automática) -->
+    <div id="caja-carga-manual">
+        <p><i class="fas fa-exclamation-triangle"></i> <span id="mensaje-error"></span></p>
+        <input type="file" id="input-excel" accept=".xlsx, .xls">
     </div>
 
-    <!-- Contenedor de la Línea de Tiempo -->
+    <div id="filtros"></div>
     <div id="timeline"></div>
 
     <!-- Pop-up Interactivo -->
@@ -151,85 +168,98 @@
             <p><strong>Descripción:</strong> <span id="popup-colD"></span></p>
             <p><strong>Detalle 1:</strong> <span id="popup-colF"></span></p>
             <p><strong>Detalle 2:</strong> <span id="popup-colG"></span></p>
-            <a href="#" id="popup-url" target="_blank" title="Abrir enlace externo" style="display:none;">
+            <a href="#" id="popup-url" target="_blank" title="Abrir enlace externo">
                 <i class="fas fa-star"></i>
             </a>
         </div>
     </div>
 
     <script>
-        // --- CONFIGURACIÓN ---
-        // REEMPLAZAR ESTA URL por la URL "Raw" de tu Excel en GitHub
-        const URL_DEL_EXCEL_EN_GITHUB = "AQUI_TU_URL_RAW_DE_GITHUB/CRONOLOGIAS_FINAL.xlsx"; 
+        // RUTA RELATIVA: Busca el archivo en la misma carpeta del repositorio.
+        const RUTA_ARCHIVO_EXCEL = "CRONOLOGIAS FINAL.xlsx"; 
         
-        let timeline;
-        let dataSetItems;
-        let dataSetGroups;
+        let timeline, dataSetItems, dataSetGroups;
         let paletaColores = ['#E74C3C', '#8E44AD', '#27AE60', '#F39C12', '#2980B9', '#D35400', '#16A085', '#2C3E50'];
         let iconMap = ['fa-landmark', 'fa-book', 'fa-flag', 'fa-users', 'fa-map-marker-alt', 'fa-gavel', 'fa-seedling'];
         let categoriaEstilos = {};
-
-        // Variables de interacción
         let popup = document.getElementById('popup');
         let popupFijo = false;
 
         async function cargarDatos() {
             try {
-                // Si estás probando localmente sin URL, aquí fallará por CORS. 
-                // En ese caso, usa un input type file o un JSON.
-                const response = await fetch(URL_DEL_EXCEL_EN_GITHUB);
+                // Intenta cargar el archivo automáticamente usando la ruta relativa
+                const response = await fetch(RUTA_ARCHIVO_EXCEL);
+                if (!response.ok) throw new Error("Archivo no encontrado o bloqueado");
+                
                 const arrayBuffer = await response.arrayBuffer();
                 const workbook = XLSX.read(arrayBuffer, { type: 'array' });
-                
-                // Suponemos que los datos están en la primera hoja
-                const primeraHoja = workbook.SheetNames[0];
-                const datos = XLSX.utils.sheet_to_json(workbook.Sheets[primeraHoja], {header: 1});
-                
-                procesarDatos(datos);
+                leerLibro(workbook);
+
             } catch (error) {
-                console.error("Error al cargar el Excel. Asegúrate de que la URL de GitHub sea correcta y pública.", error);
-                document.getElementById('timeline').innerHTML = "<p style='padding:20px; color:red;'>Error al cargar el archivo CRONOLOGIAS FINAL.xlsx. Verifica la URL de GitHub.</p>";
+                console.warn("No se pudo cargar automáticamente:", error);
+                activarCargaManual("Si estás abriendo este archivo desde tu computadora local, el navegador bloquea la carga automática por seguridad. Cuando lo subas a tu web, funcionará solo. Para probarlo ahora, selecciona el Excel de tu carpeta:");
             }
         }
 
+        // Función para activar el input de archivo local
+        function activarCargaManual(mensaje) {
+            const caja = document.getElementById('caja-carga-manual');
+            document.getElementById('mensaje-error').innerText = mensaje;
+            caja.style.display = 'block';
+
+            document.getElementById('input-excel').addEventListener('change', function(e) {
+                const file = e.target.files[0];
+                if (!file) return;
+
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    const data = new Uint8Array(e.target.result);
+                    const workbook = XLSX.read(data, { type: 'array' });
+                    caja.style.display = 'none'; // Ocultar caja al cargar el archivo
+                    leerLibro(workbook);
+                };
+                reader.readAsArrayBuffer(file);
+            });
+        }
+
+        function leerLibro(workbook) {
+            const primeraHoja = workbook.SheetNames[0];
+            const datos = XLSX.utils.sheet_to_json(workbook.Sheets[primeraHoja], {header: 1});
+            procesarDatos(datos);
+        }
+
         function procesarDatos(filas) {
-            // Eliminar encabezados
+            document.getElementById('filtros').innerHTML = '';
             const headers = filas.shift(); 
             
             let gruposRaw = new Set();
             let categoriasRaw = new Set();
             let items = [];
 
-            // Identificar localidades y categorías
             filas.forEach((fila) => {
-                if(!fila[0]) return; // Si no hay año, saltar
-                if(fila[1]) gruposRaw.add(fila[1]); // Col B: Localidades
-                if(fila[4]) categoriasRaw.add(fila[4]); // Col E: Huellas (0-index = 4)
+                if(!fila[0]) return;
+                if(fila[1]) gruposRaw.add(fila[1]); 
+                if(fila[4]) categoriasRaw.add(fila[4]); 
             });
 
-            // Crear Grupos (Eje Vertical)
-            let groups = Array.from(gruposRaw).map((loc, index) => {
-                return { id: loc, content: loc };
-            });
+            let groups = Array.from(gruposRaw).map((loc) => { return { id: loc, content: loc }; });
             dataSetGroups = new vis.DataSet(groups);
 
-            // Asignar colores/iconos a categorías
             Array.from(categoriasRaw).forEach((cat, idx) => {
                 categoriaEstilos[cat] = {
                     color: paletaColores[idx % paletaColores.length],
                     icon: iconMap[idx % iconMap.length]
                 };
             });
+            
             generarBotonesFiltro(Array.from(categoriasRaw));
 
-            // Crear Items (Línea de Tiempo)
             filas.forEach((fila, id) => {
-                if(!fila[0]) return; // Col A
+                if(!fila[0]) return; 
                 
                 let tiempo = fila[0].toString();
                 let start, end, type;
 
-                // Analizar si es periodo (ej: 1663-1800) o año puntual (1660)
                 if (tiempo.includes('-')) {
                     let partes = tiempo.split('-');
                     start = new Date(partes[0].trim(), 0, 1);
@@ -237,35 +267,33 @@
                     type = 'range';
                 } else {
                     start = new Date(tiempo.trim(), 0, 1);
-                    type = 'point'; // Punto o ícono
+                    type = 'point'; 
                 }
 
-                let cat = fila[4] || "Sin categoría"; // Col E
+                let cat = fila[4] || "Sin categoría"; 
                 let estilo = categoriaEstilos[cat];
                 let colorFondo = estilo ? estilo.color : '#999';
                 let iconClass = estilo ? estilo.icon : 'fa-circle';
 
-                // Contenido a mostrar en el timeline
                 let contentHtml = `<i class="fas ${iconClass}"></i>`;
-                if(type === 'range') contentHtml += ` <span style="padding-left:5px;">${fila[2] || ''}</span>`; // Titulo en barra
+                if(type === 'range') contentHtml += ` <span style="padding-left:5px;">${fila[2] || ''}</span>`;
 
                 items.push({
                     id: id,
-                    group: fila[1], // Localidad (Col B)
+                    group: fila[1], 
                     start: start,
                     end: end,
                     type: type,
                     content: contentHtml,
                     className: 'item-' + cat.replace(/\s+/g, '-'),
                     style: `background-color: ${colorFondo}; border-color: ${colorFondo};`,
-                    // Guardamos la info entera para el popup
                     datosExtra: {
-                        titulo: fila[2] || 'Sin título',     // Col C
-                        desc: fila[3] || 'Sin datos',        // Col D
-                        cat: cat,                            // Col E
-                        amp1: fila[5] || 'N/A',              // Col F
-                        amp2: fila[6] || 'N/A',              // Col G
-                        url: fila[7] || null,                // Col H
+                        titulo: fila[2] || 'Sin título',
+                        desc: fila[3] || 'Sin datos',
+                        cat: cat,
+                        amp1: fila[5] || 'N/A',
+                        amp2: fila[6] || 'N/A',
+                        url: fila[7] || null,
                         color: colorFondo,
                         icon: iconClass
                     }
@@ -274,20 +302,19 @@
 
             dataSetItems = new vis.DataSet(items);
 
-            // Iniciar Timeline
             var container = document.getElementById('timeline');
+            container.innerHTML = ''; 
+            
             var options = {
                 zoomable: true,
                 horizontalScroll: true,
                 stack: false,
                 margin: { item: 10, axis: 5 },
-                orientation: 'top' // Años siempre visibles arriba
+                orientation: 'top' 
             };
             
             timeline = new vis.Timeline(container, dataSetItems, dataSetGroups, options);
 
-            // --- Lógica del Pop-Up ---
-            
             timeline.on('itemover', function (properties) {
                 if(!popupFijo) mostrarPopup(properties.item, properties.event);
             });
@@ -298,10 +325,10 @@
 
             timeline.on('select', function (properties) {
                 if(properties.items.length > 0) {
-                    popupFijo = true; // Fijar
+                    popupFijo = true; 
                     mostrarPopup(properties.items[0], properties.event);
                 } else {
-                    popupFijo = false; // Soltar con click afuera
+                    popupFijo = false; 
                     popup.style.display = 'none';
                 }
             });
@@ -316,7 +343,6 @@
                 btn.innerHTML = `<i class="fas ${estilo.icon}"></i> ${cat}`;
                 btn.style.borderColor = estilo.color;
                 
-                // Toggle filtro
                 btn.onclick = function() {
                     this.classList.toggle('activo');
                     if(this.classList.contains('activo')) {
@@ -329,10 +355,8 @@
                     filtrarItems();
                 };
                 
-                // Color inicial (activo)
                 btn.style.backgroundColor = estilo.color;
                 btn.style.color = "white";
-                
                 contenedor.appendChild(btn);
             });
         }
@@ -343,7 +367,6 @@
                 activos.push(btn.innerText.trim());
             });
 
-            // Ocultar o mostrar manipulando el dataset
             let allItems = dataSetItems.get();
             allItems.forEach(item => {
                 if(activos.includes(item.datosExtra.cat)) {
@@ -353,7 +376,6 @@
                 }
             });
             
-            // Actualizar vista. Para vis-timeline ocultamos via CSS
             let css = document.getElementById('estilo-dinamico');
             if(!css) {
                 css = document.createElement('style');
@@ -368,25 +390,21 @@
             if(!item) return;
             let d = item.datosExtra;
 
-            // Posicionar popup cerca del mouse
             let x = evento.pageX + 15;
             let y = evento.pageY + 15;
             popup.style.left = x + 'px';
             popup.style.top = y + 'px';
 
-            // Llenar datos básicos
             document.getElementById('popup-category').innerText = d.cat;
             document.getElementById('popup-icon').className = 'fas ' + d.icon;
             document.getElementById('popup-header').style.color = d.color;
             popup.style.borderTopColor = d.color;
             document.getElementById('popup-title').innerText = d.titulo;
 
-            // Datos ampliados
             document.getElementById('popup-colD').innerText = d.desc;
             document.getElementById('popup-colF').innerText = d.amp1;
             document.getElementById('popup-colG').innerText = d.amp2;
 
-            // Enlace (Estrellita)
             let link = document.getElementById('popup-url');
             if(d.url && d.url.startsWith('http')) {
                 link.href = d.url;
@@ -395,7 +413,6 @@
                 link.style.display = 'none';
             }
 
-            // Resetear "ver más"
             document.getElementById('popup-extra').style.display = 'none';
             document.querySelector('.btn-ver-mas').innerHTML = 'Ver más <i class="fas fa-chevron-down"></i>';
             
@@ -414,7 +431,6 @@
             }
         }
 
-        // --- INICIAR ---
         window.onload = cargarDatos;
     </script>
 </body>
